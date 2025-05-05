@@ -277,7 +277,8 @@ if __name__ == '__main__':
         instance_map = {} # Map choice string back to instance data
         if running_instances:
             for i, inst in enumerate(running_instances):
-                choice_str = f"[{i+1}] {inst.get('Name', 'N/A')} ({inst.get('InstanceId', 'N/A')})"
+                # Include Private IP in the choice string for searching
+                choice_str = f"[{i+1}] {inst.get('Name', 'N/A')} ({inst.get('InstanceId', 'N/A')}) - IP: {inst.get('PrivateIpAddress', 'N/A')}"
                 instance_choices.append(choice_str)
                 instance_map[choice_str] = inst
 
