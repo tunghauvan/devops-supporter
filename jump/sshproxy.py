@@ -3,6 +3,7 @@ import logging
 import csv
 import os
 import subprocess
+import argparse  # Add argparse for command line arguments
 # Add prompt_toolkit imports
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import FuzzyCompleter
@@ -180,11 +181,28 @@ def ssh_via_jump_host(target_ip, target_user, jump_host_ip, jump_host_user, loca
 
 # Example usage (optional - can be removed or placed under __main__)
 if __name__ == '__main__':
-    # Define the output file path relative to the script location
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    csv_filename = os.path.join(script_dir, '.tmp.csv')
-    history_filename = os.path.join(script_dir, '.sshproxy_history') # For command history
-    target_region = 'ap-southeast-1' # Example region
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='SSH Proxy for AWS EC2 instances')
+    parser.add_argument('--no-cache', '-n', action='store_true', help='Ignore cache and fetch fresh data from AWS')
+    parser.add_argument('--region', '-r', default='ap-southeast-1', help='AWS region (default: ap-southeast-1)')
+    args = parser.parse_args()
+    
+    # Define the output file path in user's home directory
+    user_home = os.path.expanduser("~")
+    cache_dir = os.path.join(user_home, ".tmp")
+    
+    # Create cache directory if it doesn't exist
+    if not os.path.exists(cache_dir):
+        try:
+            os.makedirs(cache_dir)
+            logging.info(f"Created cache directory: {cache_dir}")
+        except OSError as e:
+            logging.error(f"Failed to create cache directory {cache_dir}: {e}")
+            print(f"Error: Could not create cache directory {cache_dir}")
+    
+    csv_filename = os.path.join(cache_dir, "jump.cache")
+    history_filename = os.path.join(cache_dir, ".sshproxy_history") # For command history
+    target_region = args.region # Use region from command line arguments
 
     # Function to load or fetch instances (extracted for re-use)
     def load_or_fetch_instances(force_fetch=False):
@@ -269,7 +287,7 @@ if __name__ == '__main__':
 
 
     # --- Main Loop ---
-    running_instances = load_or_fetch_instances()
+    running_instances = load_or_fetch_instances(force_fetch=args.no_cache)
     session_history = FileHistory(history_filename)
 
     while True:
