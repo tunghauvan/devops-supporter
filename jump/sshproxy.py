@@ -180,10 +180,13 @@ def ssh_via_jump_host(target_ip, target_user, jump_host_ip, jump_host_user, loca
 
 # Example usage (optional - can be removed or placed under __main__)
 if __name__ == '__main__':
-    # Define the output file path relative to the script location
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    csv_filename = os.path.join(script_dir, '.tmp.csv')
-    history_filename = os.path.join(script_dir, '.sshproxy_history') # For command history
+    # Define the cache directory in user profile
+    cache_dir = os.path.expanduser('~/.local/sshjump/cache')
+    # Create cache directory if it doesn't exist
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    csv_filename = os.path.join(cache_dir, 'instances.csv')
+    history_filename = os.path.join(cache_dir, 'sshproxy_history') # For command history
     target_region = 'ap-southeast-1' # Example region
 
     # Function to load or fetch instances (extracted for re-use)

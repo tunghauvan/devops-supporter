@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+import subprocess
+import os
+import re
+import json
+import argparse
+from urllib.parse import urlparse
+
+# Global config file
+GLOBAL_CONFIG_FILE = os.path.expanduser('~/.git-tokens.json')
+
+def load_owner_tokens():
+    """Load owner to token mapping from global config file."""
+    if os.path.exists(GLOBAL_CONFIG_FILE):
+        try:
+            with open(GLOBAL_CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+                return config
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Error loading config file {GLOBAL_CONFIG_FILE}: {e}")
+            return {}
+    else:
+        print(f"Global config file {GLOBAL_CONFIG_FILE} not found. Please create it with owner_tokens mapping.")
+        return {}
+
+# Load config at module level
+CONFIG = load_owner_tokens()
+OWNER_TOKENS = CONFIG.get('owner_tokens', {})
+
+def is_git_repo():
+    """Check if the current directory is a Git repository."""
+    return os.path.isdir('.git')
+
+def get_remote_url(remote_name='origin'):
+    """Get the URL of the specified remote."""
+    try:
+        result = subprocess.run(['git', 'remote', 'get-url', remote_name],
+                                capture_output=True, text=True, check=True)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        return None
+
+def set_remote_url(remote_name, url):
+    """Set the URL for the specified remote."""
+    try:
+        subprocess.run(['git', 'remote', 'set-url', remote_name, url],
+                       check=True)
+        print(f"Updated remote '{remote_name}' to: {url}")
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to set remote URL: {e}")
+
+def set_git_config(owner):
+    """Set git user.name and user.email based on owner config."""
+    owner_config = CONFIG.get('owners', {}).get(owner, {})
+    name = owner_config.get('name')
+    email = owner_config.get('email')
+
+    if name:
+        try:
+            subprocess.run(['git', 'config', 'user.name', name], check=True)
+            print(f"Set user.name to: {name}")
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to set user.name: {e}")
+
+    if email:
+        try:
+            subprocess.run(['git', 'config', 'user.email', email], check=True)
+            print(f"Set user.email to: {email}")
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to set user.email: {e}")
+
+    if not name and not email:
+        print(f"No user config found for owner '{owner}'. Skipping git config.")
+
+def parse_github_url(url):
+    """Parse GitHub URL to extract owner and repo."""
+    # Handle HTTPS URLs
+    if url.startswith('https://'):
+        parsed = urlparse(url)
+        if parsed.netloc == 'github.com':
+            path_parts = parsed.path.strip('/').split('/')
+            if len(path_parts) >= 2:
+                owner = path_parts[0]
+                repo = path_parts[1].replace('.git', '')  # Remove .git if present
+                return owner, repo, 'https'
+    # Handle SSH URLs (git@github.com:owner/repo.git)
+    elif url.startswith('git@'):
+        match = re.match(r'git@github\.com:([^/]+)/(.+)\.git', url)
+        if match:
+            owner = match.group(1)
+            repo = match.group(2)  # Already without .git
+            return owner, repo, 'ssh'
+    return None, None, None
+
+def update_remote_with_token(dry_run=False, remote_name='origin', config_only=False):
+    """Update the remote URL to include the appropriate GitHub token based on the owner."""
+    if not is_git_repo():
+        print("Not a Git repository.")
+        return
+
+    remote_url = get_remote_url(remote_name)
+    if not remote_url:
+        print(f"No remote '{remote_name}' found.")
+        return
+
+    owner, repo, protocol = parse_github_url(remote_url)
+    if not owner:
+        print("Not a GitHub repository or unsupported URL format.")
+        return
+
+    if not config_only:
+        token = OWNER_TOKENS.get(owner)
+        if not token:
+            print(f"No token configured for owner '{owner}'.")
+            return
+
+        if protocol == 'https':
+            # Insert token into HTTPS URL
+            new_url = f"https://{token}@github.com/{owner}/{repo}.git"
+        elif protocol == 'ssh':
+            # For SSH, we might need to convert to HTTPS with token
+            # Since the example is HTTPS, we'll convert SSH to HTTPS
+            new_url = f"https://{token}@github.com/{owner}/{repo}.git"
+        else:
+            print("Unsupported protocol.")
+            return
+
+        if dry_run:
+            print(f"Dry run: Would update remote '{remote_name}' from {remote_url} to {new_url}")
+        else:
+            set_remote_url(remote_name, new_url)
+
+    # Always set git config if not dry-run
+    if not dry_run:
+        set_git_config(owner)
+    elif config_only:
+        print(f"Dry run: Would set git config for owner '{owner}'")
+        owner_config = CONFIG.get('owners', {}).get(owner, {})
+        name = owner_config.get('name')
+        email = owner_config.get('email')
+        if name:
+            print(f"  user.name: {name}")
+        if email:
+            print(f"  user.email: {email}")
+        if not name and not email:
+            print(f"  No user config found for owner '{owner}'")
+
+def setup_config():
+    """Setup the global config file with example."""
+    if os.path.exists(GLOBAL_CONFIG_FILE):
+        print(f"Config file already exists: {GLOBAL_CONFIG_FILE}")
+        return
+
+    example_config = {
+        "owner_tokens": {
+            "tunghauvan": "ghp_xxx",
+            "tunghauvan-interspace": "ghp_yyy"
+        },
+        "owners": {
+            "tunghauvan": {
+                "name": "Tung Hau Van",
+                "email": "tung@example.com"
+            },
+            "tunghauvan-interspace": {
+                "name": "Tung Hau Van Interspace",
+                "email": "tung@interspace.com"
+            }
+        }
+    }
+
+    try:
+        with open(GLOBAL_CONFIG_FILE, 'w') as f:
+            json.dump(example_config, f, indent=2)
+        print(f"Created config file: {GLOBAL_CONFIG_FILE}")
+        print("Please edit it with your actual GitHub tokens.")
+    except IOError as e:
+        print(f"Failed to create config file: {e}")
+
+def set_token_for_owner(owner, token):
+    """Set token for a given owner in the config file."""
+    config = load_owner_tokens()
+    if 'owner_tokens' not in config:
+        config['owner_tokens'] = {}
+    config['owner_tokens'][owner] = token
+    try:
+        with open(GLOBAL_CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+        print(f"Set token for owner '{owner}'")
+    except IOError as e:
+        print(f"Failed to save config: {e}")
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Git Token Manager for GitHub remotes.')
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+
+    # auth command
+    auth_parser = subparsers.add_parser('auth', help='Update remote URL with token')
+    auth_parser.add_argument('--dry-run', action='store_true', help='Show what would be changed without making changes')
+    auth_parser.add_argument('--remote', default='origin', help='Remote name to update (default: origin)')
+    auth_parser.add_argument('--config-only', action='store_true', help='Only set git user config, do not update remote')
+
+    # setup command
+    setup_parser = subparsers.add_parser('setup', help='Setup global config file')
+
+    # list command
+    list_parser = subparsers.add_parser('list', help='List configured owner-token mappings')
+
+    # set command
+    set_parser = subparsers.add_parser('set', help='Set token for an owner')
+    set_parser.add_argument('owner', help='GitHub owner')
+    set_parser.add_argument('token', help='GitHub token')
+
+    args = parser.parse_args()
+
+    if args.command == 'auth':
+        update_remote_with_token(dry_run=args.dry_run, remote_name=args.remote, config_only=getattr(args, 'config_only', False))
+    elif args.command == 'setup':
+        setup_config()
+    elif args.command == 'list':
+        print("Configured owner-token mappings:")
+        for owner, token in OWNER_TOKENS.items():
+            masked_token = token[:4] + '*' * (len(token) - 4) if len(token) > 4 else token
+            print(f"  {owner}: {masked_token}")
+    elif args.command == 'set':
+        set_token_for_owner(args.owner, args.token)
+    else:
+        parser.print_help()

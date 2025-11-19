@@ -1,0 +1,3 @@
+boto3
+prompt_toolkit
+pyinstaller
